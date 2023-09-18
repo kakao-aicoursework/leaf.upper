@@ -3,3 +3,4 @@
 .web
 pynecone.db
 __pycache__/
+appkey.txt

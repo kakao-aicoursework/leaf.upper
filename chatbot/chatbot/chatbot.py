@@ -2,15 +2,12 @@
 
 # Import pynecone.
 import openai
-import os
 from datetime import datetime
 
 import pynecone as pc
 from pynecone.base import Base
 
-
-# openai.api_key = "<YOUR_OPENAI_API_KEY>"
-openai.api_key = ""
+openai.api_key = open("appkey.txt", "r").read()
 
 
 parallel_example = {
