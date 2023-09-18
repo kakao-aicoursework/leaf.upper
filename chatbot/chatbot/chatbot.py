@@ -1,109 +1,85 @@
 """Welcome to Pynecone! This file outlines the steps to create a basic app."""
 
-# Import pynecone.
-import openai
 from datetime import datetime
 
 import pynecone as pc
 from pynecone.base import Base
+from langchain import LLMChain
 
-openai.api_key = open("appkey.txt", "r").read()
+from langchain.chat_models import ChatOpenAI
+
+from langchain.prompts.chat import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+)
+
+from langchain.schema import SystemMessage
+
+import os
+
+os.environ["OPENAI_API_KEY"] = open("appkey.txt", "r").read()
+
+data =open("kakaosink.txt", "r").read()
+
+def build_llm():
+    system_instruction = SystemMessage(content="assistant는 개발자에게 도움을 주기 위한 챗봇으로써 동작한다. 사용자의 질문에 대해서 카카오싱크 문서를 참조하여 간략하게 요약하여 한국어로 작성한다.")
+    human_template = """
+    아래 질문에 대해서 3줄 요약 답변해줘
+    --- 
+    {text}
+    """
+    llm = ChatOpenAI(temperature=1)
+    human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)
+    return LLMChain(llm=llm, prompt=ChatPromptTemplate.from_messages([system_instruction, data, human_message_prompt]))
 
 
-parallel_example = {
-    "한국어": ["오늘 날씨 어때", "딥러닝 기반의 AI기술이 인기를끌고 있다."],
-    "영어": ["How is the weather today", "Deep learning-based AI technology is gaining popularity."],
-    "일본어": ["今日の天気はどうですか", "ディープラーニングベースのAIテクノロジーが人気を集めています。"]
-}
+def query_text_using_chatgpt(text) -> str:
+    chain = build_llm()
+    result = chain.run(text=text)
 
-
-def translate_text_using_text_davinci(text, src_lang, trg_lang) -> str:
-    response = openai.Completion.create(engine="text-davinci-003",
-                                        prompt=f"Translate the following {src_lang} text to {trg_lang}: {text}",
-                                        max_tokens=200,
-                                        n=1,
-                                        temperature=1
-                                        )
-    translated_text = response.choices[0].text.strip()
-    return translated_text
-
-
-def translate_text_using_chatgpt(text, src_lang, trg_lang) -> str:
-    # fewshot 예제를 만들고
-    def build_fewshot(src_lang, trg_lang):
-        src_examples = parallel_example[src_lang]
-        trg_examples = parallel_example[trg_lang]
-
-        fewshot_messages = []
-
-        for src_text, trg_text in zip(src_examples, trg_examples):
-            fewshot_messages.append({"role": "user", "content": src_text})
-            fewshot_messages.append({"role": "assistant", "content": trg_text})
-
-        return fewshot_messages
-
-    # system instruction 만들고
-    system_instruction = f"assistant는 번역앱으로서 동작한다. {src_lang}를 {trg_lang}로 적절하게 번역하고 번역된 텍스트만 출력한다."
-
-    # messages를만들고
-    fewshot_messages = build_fewshot(src_lang=src_lang, trg_lang=trg_lang)
-
-    messages = [{"role": "system", "content": system_instruction},
-                *fewshot_messages,
-                {"role": "user", "content": text}
-                ]
-
-    # API 호출
-    response = openai.ChatCompletion.create(model="gpt-3.5-turbo",
-                                            messages=messages)
-    translated_text = response['choices'][0]['message']['content']
+    print(result)
     # Return
-    return translated_text
+    return result
 
 
 class Message(Base):
-    original_text: str
-    text: str
+    message: str
     created_at: str
-    to_lang: str
+    is_user: bool
+    is_gpt: bool
 
 
 class State(pc.State):
-    """The app state."""
-
     text: str = ""
-    messages: list[Message] = []
-    src_lang: str = "한국어"
-    trg_lang: str = "영어"
 
-    @pc.var
-    def output(self) -> str:
-        if not self.text.strip():
-            return "Translations will appear here."
-        translated = translate_text_using_chatgpt(
-            self.text, src_lang=self.src_lang, trg_lang=self.trg_lang)
-        return translated
+    """The app state."""
+    messages: list[Message] = [Message(message="안녕하세요 챗봇 서비스를 시작합니다. 궁금하신 내용을 물어보세요?",
+                                       created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
+                                       is_user=False,
+                                       is_gpt=True)]
 
-    def post(self):
-        self.messages = [
-            Message(
-                original_text=self.text,
-                text=self.output,
-                created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
-                to_lang=self.trg_lang,
-            )
-        ] + self.messages
+    def ask(self):
+        self.messages = self.messages + [Message(message=self.text,
+                                                 created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
+                                                 is_user=True,
+                                                 is_gpt=False)]
+
+        gpt_result = query_text_using_chatgpt(self.text)
+
+        self.messages = self.messages + [Message(message=gpt_result,
+                                                 created_at=datetime.now().strftime("%B %d, %Y %I:%M %p"),
+                                                 is_user=False,
+                                                 is_gpt=True)]
 
 
 # Define views.
 
-
 def header():
     """Basic instructions to get started."""
     return pc.box(
-        pc.text("Translator 🗺", font_size="2rem"),
+        pc.text("카카오 싱크 챗봇 🗺", font_size="2rem"),
         pc.text(
-            "Translate things and post them as messages!",
+            "chatbot system",
             margin_top="0.5rem",
             color="#666",
         ),
@@ -119,68 +95,33 @@ def down_arrow():
     )
 
 
-def text_box(text):
-    return pc.text(
-        text,
-        background_color="#fff",
-        padding="1rem",
-        border_radius="8px",
-    )
+def text_box(message):
+    if message.is_gpt:
+        return pc.text(
+            message.message,
+            background_color="#fff",
+            padding="1rem",
+            border_radius="8px",
+        )
+    else:
+        return pc.text(
+            message.message,
+            background_color="#111",
+            padding="1rem",
+            border_radius="8px",
+        )
 
 
-def message(message):
+def gpt_message_box(message):
     return pc.box(
         pc.vstack(
-            text_box(message.original_text),
-            down_arrow(),
-            text_box(message.text),
-            pc.box(
-                pc.text(message.to_lang),
-                pc.text(" · ", margin_x="0.3rem"),
-                pc.text(message.created_at),
-                display="flex",
-                font_size="0.8rem",
-                color="#666",
-            ),
+            text_box(message),
             spacing="0.3rem",
             align_items="left",
         ),
         background_color="#f5f5f5",
         padding="1rem",
-        border_radius="8px",
-    )
-
-
-def smallcaps(text, **kwargs):
-    return pc.text(
-        text,
-        font_size="0.7rem",
-        font_weight="bold",
-        text_transform="uppercase",
-        letter_spacing="0.05rem",
-        **kwargs,
-    )
-
-
-def output():
-    return pc.box(
-        pc.box(
-            smallcaps(
-                "Output",
-                color="#aeaeaf",
-                background_color="white",
-                padding_x="0.1rem",
-            ),
-            position="absolute",
-            top="-0.5rem",
-        ),
-        pc.text(State.output),
-        padding="1rem",
-        border="1px solid #eaeaef",
-        margin_top="1rem",
-        border_radius="8px",
-        position="relative",
-    )
+        border_radius="8px")
 
 
 def index():
@@ -188,29 +129,15 @@ def index():
     return pc.container(
         header(),
         pc.input(
-            placeholder="Text to translate",
             on_blur=State.set_text,
-            margin_top="1rem",
-            border_color="#eaeaef"
+            placeholder="Ask any question...",
+            border_color="#eaeaef",
         ),
-        pc.select(
-            list(parallel_example.keys()),
-            value=State.src_lang,
-            placeholder="Select a language",
-            on_change=State.set_src_lang,
-            margin_top="1rem",
+        pc.button(
+            "질문하기", on_click=State.ask
         ),
-        pc.select(
-            list(parallel_example.keys()),
-            value=State.trg_lang,
-            placeholder="Select a language",
-            on_change=State.set_trg_lang,
-            margin_top="1rem",
-        ),
-        output(),
-        pc.button("Post", on_click=State.post, margin_top="1rem"),
         pc.vstack(
-            pc.foreach(State.messages, message),
+            pc.foreach(State.messages, gpt_message_box),
             margin_top="2rem",
             spacing="1rem",
             align_items="left"
@@ -219,8 +146,11 @@ def index():
         max_width="600px"
     )
 
+    return message_boxes
+
 
 # Add state and page to the app.
+
 app = pc.App(state=State)
-app.add_page(index, title="Translator")
+app.add_page(index, title="카카오싱크 챗봇")
 app.compile()
